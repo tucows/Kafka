@@ -456,6 +456,7 @@ sub new {
         ssl_cert_file           => undef,
         ssl_key_file            => undef,
         ssl_ca_file             => undef,
+        ssl_verify_mode         => undef,
         ip_version              => undef,
         SEND_MAX_ATTEMPTS       => $SEND_MAX_ATTEMPTS,
         RETRY_BACKOFF           => $RETRY_BACKOFF,

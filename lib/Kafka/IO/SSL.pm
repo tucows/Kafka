@@ -40,10 +40,7 @@ use Kafka qw(
     $ERROR_CANNOT_RECV
     $ERROR_CANNOT_SEND
     $ERROR_MISMATCH_ARGUMENT
-    $ERROR_INCOMPATIBLE_HOST_IP_VERSION
     $ERROR_NO_CONNECTION
-    $IP_V4
-    $IP_V6
     $KAFKA_SERVER_PORT
     $REQUEST_TIMEOUT
 );
@@ -55,7 +52,7 @@ use Kafka::Internals qw(
 );
 use IO::Socket::SSL;
 use IO::Socket;
-
+use Data::Dumper;
 
 =head1 SYNOPSIS
 
@@ -72,7 +69,7 @@ use IO::Socket;
 
     my $io;
     try {
-        $io = Kafka::IO::Async->new( host => 'localhost' );
+        $io = Kafka::IO::SSL->new( host => 'localhost' );
     } catch {
         my $error = $_;
         if ( blessed( $error ) && $error->isa( 'Kafka::Exception' ) ) {
@@ -94,7 +91,7 @@ This module is private and should not be used directly.
 In order to achieve better performance, methods of this module do not
 perform arguments validation.
 
-The main features of the C<Kafka::IO::Async> class are:
+The main features of the C<Kafka::IO::SSL> class are:
 
 =over 3
 
@@ -121,7 +118,7 @@ our $_hdr;
 
 =head3 C<new>
 
-Establishes TCP connection to given host and port, creates and returns C<Kafka::IO::Async> IO object.
+Establishes secure TCP connection to given host and port, creates and returns C<Kafka::IO::SSL> IO object.
 
 C<new()> takes arguments in key-value pairs. The following arguments are currently recognized:
 
@@ -141,6 +138,32 @@ C<$port> is integer attribute denoting the port number of to access Apache Kafka
 C<$KAFKA_SERVER_PORT> is the default Apache Kafka server port that can be imported
 from the L<Kafka|Kafka> module.
 
+=item C<ssl_cert_file =E<gt> $ssl_cert_file>
+
+C<$ssl_cert_file> file path with client certificates, which should be verified by the server.
+
+Supported file formats are PEM, DER and PKCS#12, where PEM and PKCS#12 can contain the certificate and
+the chain to use, while DER can only contain a single certificate. If a key was already given
+within the PKCS#12 file specified by SSL_cert_file it will ignore any SSL_key or SSL_key_file.
+If no SSL_key or SSL_key_file was given it will try to use the PEM file given with SSL_cert_file again,
+maybe it contains the key too. For more information see https://metacpan.org/pod/IO::Socket::SSL 
+
+=item C<ssl_key_file =E<gt> $ssl_key_file>
+
+C<$ssl_key_file> For each certificate a key is need, which can either be given as a file with SSL_key_file
+
+=item C<ssl_ca_file =E<gt> $ssl_ca_file>
+
+C<$ssl_ca_file> Usually you want to verify that the peer certificate has been signed by a trusted certificate authority.
+In this case you should use this option to specify the file (SSL_ca_file) or directory (SSL_ca_path)
+containing the certificate(s) of the trusted certificate authorities.
+
+=item C<ssl_verify_mode =E<gt> $ssl_verify_mode>
+
+C<$VERIFY_MODE> is the default verify mode (SSL_VERIFY_PEER)
+
+C<$ssl_verify_mode> option to set the verification mode for the peer certificate. 
+
 =item C<timeout =E<gt> $timeout>
 
 C<$REQUEST_TIMEOUT> is the default timeout that can be imported from the L<Kafka|Kafka> module.
@@ -153,25 +176,7 @@ Special behavior when C<timeout> is set to C<undef>:
 
 =item *
 
-Alarms are not used internally (namely when performing C<gethostbyname>).
-
-=item *
-
 Default C<$REQUEST_TIMEOUT> is used for the rest of IO operations.
-
-=back
-
-=over 3
-
-=item C<ip_version =E<gt> $ip_version>
-
-Force version of IP protocol for resolving host name (or interpretation of passed address).
-
-Optional, undefined by default, which works in the following way: version of IP address
-is detected automatically, host name is resolved into IPv4 address.
-
-See description of L<$IP_V4|Kafka::IO/$IP_V4>, L<$IP_V6|Kafka::IO/$IP_V6>
-in C<Kafka> L<EXPORT|Kafka/EXPORT>.
 
 =back
 
@@ -184,6 +189,10 @@ sub new {
         timeout     => $REQUEST_TIMEOUT,
         port        => $KAFKA_SERVER_PORT,
         ip_version  => undef,
+        ssl_cert_file => undef,
+        ssl_key_file => undef,
+        ssl_ca_file => undef,
+        ssl_verify_mode => SSL_VERIFY_PEER
     }, $class;
 
     exists $p{$_} and $self->{$_} = $p{$_} foreach keys %$self;
@@ -335,6 +344,7 @@ sub receive {
     $self->_debug_msg( $message, 'Response from', 'yellow' )
         if $self->debug_level >= 2;
 
+
     return \$message;
 }
 
@@ -375,8 +385,7 @@ sub close {
 
 #-- private methods ------------------------------------------------------------
 
-# You need to have access to Kafka instance and be able to connect through TCP.
-# uses http://devpit.org/wiki/Connect%28%29_with_timeout_%28in_Perl%29
+# You need to have access to Kafka instance and be able to connect through secure TCP.
 sub _connect {
     my ( $self ) = @_;
 
@@ -396,7 +405,7 @@ sub _connect {
 
     my $error = $SSL_ERROR unless IO::Socket::SSL->start_SSL(
         $sock,
-        SSL_verify_mode => SSL_VERIFY_PEER,
+        SSL_verify_mode => $self->{ssl_verify_mode},
         SSL_cert_file => $self->{ssl_cert_file},
         SSL_key_file => $self->{ssl_key_file},
         SSL_ca_file => $self->{ssl_ca_file}
@@ -487,7 +496,7 @@ for the list of all available methods.
 Authors suggest using of L<Try::Tiny|Try::Tiny>'s C<try> and C<catch> to handle exceptions while
 working with L<Kafka|Kafka> package.
 
-Here is the list of possible error messages that C<Kafka::IO::Async> may produce:
+Here is the list of possible error messages that C<Kafka::IO::SSL> may produce:
 
 =over 3
 
@@ -497,7 +506,7 @@ Invalid arguments were passed to a method.
 
 =item C<Cannot send>
 
-Message cannot be sent on a C<Kafka::IO::Async> object socket.
+Message cannot be sent on a C<Kafka::IO::SSL> object socket.
 
 =item C<Cannot receive>
 
@@ -518,7 +527,7 @@ C<PERL_KAFKA_DEBUG=1>     - debug is enabled for the whole L<Kafka|Kafka> packag
 
 C<PERL_KAFKA_DEBUG=IO:1>  - enable debug for C<Kafka::IO::Async> only.
 
-C<Kafka::IO::Async> supports two debug levels (level 2 includes debug output of 1):
+C<Kafka::IO::SSL> supports two debug levels (level 2 includes debug output of 1):
 
 =over 3
 
