@@ -9,7 +9,7 @@ Kafka - Apache Kafka low-level synchronous API, which does not use Zookeeper.
 
 =head1 VERSION
 
-This documentation refers to C<Kafka> package version 1.08 .
+This documentation refers to C<Kafka> package version 1.09 .
 
 =cut
 
@@ -21,7 +21,7 @@ use warnings;
 
 
 
-our $VERSION = 'v1.08';
+our $VERSION = 'v1.09';
 
 use Exporter qw(
     import
@@ -863,10 +863,10 @@ const our $ERROR_CANNOT_GET_METADATA            => -1007;
 
 =item C<$ERROR_LEADER_NOT_FOUND>
 
--1008 - Leader not found
+-1.09 - Leader not found
 
 =cut
-const our $ERROR_LEADER_NOT_FOUND               => -1008;
+const our $ERROR_LEADER_NOT_FOUND               => -1.09;
 
 =item C<$ERROR_MISMATCH_CORRELATIONID>
 
