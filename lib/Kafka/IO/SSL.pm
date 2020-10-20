@@ -253,8 +253,10 @@ sub send {
 
     my $started = Time::HiRes::time();
 
+    
     undef $!;
     my $sent = $socket->print($message);
+    
     my $error = $!;
 
     unless (defined( $sent ) && $sent == $length ){
@@ -381,6 +383,8 @@ sub close {
 }
 
 
+
+
 #-- private attributes ---------------------------------------------------------
 
 #-- private methods ------------------------------------------------------------
@@ -474,7 +478,7 @@ sub _error {
     my $self = shift;
     my %args = throw_args( @_ );
     $self->_debug_msg( format_message( 'throwing IO error %s: %s', $args{code}, $args{message} ) )
-        if $self->debug_level;
+        if $self->debug_level || 1;
     Kafka::Exception::IO->throw( %args );
 }
 
