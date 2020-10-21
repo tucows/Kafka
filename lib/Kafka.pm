@@ -866,7 +866,7 @@ const our $ERROR_CANNOT_GET_METADATA            => -1007;
 -1.09 - Leader not found
 
 =cut
-const our $ERROR_LEADER_NOT_FOUND               => -1.09;
+const our $ERROR_LEADER_NOT_FOUND               => -1008;
 
 =item C<$ERROR_MISMATCH_CORRELATIONID>
 
