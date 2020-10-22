@@ -863,7 +863,7 @@ const our $ERROR_CANNOT_GET_METADATA            => -1007;
 
 =item C<$ERROR_LEADER_NOT_FOUND>
 
--1.09 - Leader not found
+-1008 - Leader not found
 
 =cut
 const our $ERROR_LEADER_NOT_FOUND               => -1008;
