@@ -1,8 +1,8 @@
-package Kafka::IO::Async;
+package Kafka::IO::SSL;
 
 =head1 NAME
 
-Kafka::IO::Async - Pseudo async interface to nonblocking network communication with the Apache Kafka server with Coro.
+Kafka::IO::SSL - SSL interface to nonblocking network communication with the Apache Kafka server with Coro.
 This module implements the same interface that usual Kafka::IO module
 
 =head1 VERSION
@@ -40,10 +40,7 @@ use Kafka qw(
     $ERROR_CANNOT_RECV
     $ERROR_CANNOT_SEND
     $ERROR_MISMATCH_ARGUMENT
-    $ERROR_INCOMPATIBLE_HOST_IP_VERSION
     $ERROR_NO_CONNECTION
-    $IP_V4
-    $IP_V6
     $KAFKA_SERVER_PORT
     $REQUEST_TIMEOUT
 );
@@ -53,10 +50,9 @@ use Kafka::Internals qw(
     debug_level
     format_message
 );
-
-use AnyEvent::Handle;
-
-
+use IO::Socket::SSL;
+use IO::Socket;
+use Data::Dumper;
 
 =head1 SYNOPSIS
 
@@ -73,7 +69,7 @@ use AnyEvent::Handle;
 
     my $io;
     try {
-        $io = Kafka::IO::Async->new( host => 'localhost' );
+        $io = Kafka::IO::SSL->new( host => 'localhost' );
     } catch {
         my $error = $_;
         if ( blessed( $error ) && $error->isa( 'Kafka::Exception' ) ) {
@@ -95,7 +91,7 @@ This module is private and should not be used directly.
 In order to achieve better performance, methods of this module do not
 perform arguments validation.
 
-The main features of the C<Kafka::IO::Async> class are:
+The main features of the C<Kafka::IO::SSL> class are:
 
 =over 3
 
@@ -111,6 +107,9 @@ This class allows you to create Kafka 0.9+ clients.
 
 =cut
 
+# Hard limit of IO operation retry attempts, to prevent high CPU usage in IO retry loop
+const my $MAX_RETRIES => 30;
+
 our $_hdr;
 
 #-- constructor ----------------------------------------------------------------
@@ -119,7 +118,7 @@ our $_hdr;
 
 =head3 C<new>
 
-Establishes TCP connection to given host and port, creates and returns C<Kafka::IO::Async> IO object.
+Establishes secure TCP connection to given host and port, creates and returns C<Kafka::IO::SSL> IO object.
 
 C<new()> takes arguments in key-value pairs. The following arguments are currently recognized:
 
@@ -139,6 +138,32 @@ C<$port> is integer attribute denoting the port number of to access Apache Kafka
 C<$KAFKA_SERVER_PORT> is the default Apache Kafka server port that can be imported
 from the L<Kafka|Kafka> module.
 
+=item C<ssl_cert_file =E<gt> $ssl_cert_file>
+
+C<$ssl_cert_file> file path with client certificates, which should be verified by the server.
+
+Supported file formats are PEM, DER and PKCS#12, where PEM and PKCS#12 can contain the certificate and
+the chain to use, while DER can only contain a single certificate. If a key was already given
+within the PKCS#12 file specified by SSL_cert_file it will ignore any SSL_key or SSL_key_file.
+If no SSL_key or SSL_key_file was given it will try to use the PEM file given with SSL_cert_file again,
+maybe it contains the key too. For more information see https://metacpan.org/pod/IO::Socket::SSL 
+
+=item C<ssl_key_file =E<gt> $ssl_key_file>
+
+C<$ssl_key_file> For each certificate a key is need, which can either be given as a file with SSL_key_file
+
+=item C<ssl_ca_file =E<gt> $ssl_ca_file>
+
+C<$ssl_ca_file> Usually you want to verify that the peer certificate has been signed by a trusted certificate authority.
+In this case you should use this option to specify the file (SSL_ca_file) or directory (SSL_ca_path)
+containing the certificate(s) of the trusted certificate authorities.
+
+=item C<ssl_verify_mode =E<gt> $ssl_verify_mode>
+
+C<$VERIFY_MODE> is the default verify mode (SSL_VERIFY_PEER)
+
+C<$ssl_verify_mode> option to set the verification mode for the peer certificate. 
+
 =item C<timeout =E<gt> $timeout>
 
 C<$REQUEST_TIMEOUT> is the default timeout that can be imported from the L<Kafka|Kafka> module.
@@ -151,25 +176,7 @@ Special behavior when C<timeout> is set to C<undef>:
 
 =item *
 
-Alarms are not used internally (namely when performing C<gethostbyname>).
-
-=item *
-
 Default C<$REQUEST_TIMEOUT> is used for the rest of IO operations.
-
-=back
-
-=over 3
-
-=item C<ip_version =E<gt> $ip_version>
-
-Force version of IP protocol for resolving host name (or interpretation of passed address).
-
-Optional, undefined by default, which works in the following way: version of IP address
-is detected automatically, host name is resolved into IPv4 address.
-
-See description of L<$IP_V4|Kafka::IO/$IP_V4>, L<$IP_V6|Kafka::IO/$IP_V6>
-in C<Kafka> L<EXPORT|Kafka/EXPORT>.
 
 =back
 
@@ -182,9 +189,10 @@ sub new {
         timeout     => $REQUEST_TIMEOUT,
         port        => $KAFKA_SERVER_PORT,
         ip_version  => undef,
-        af          => '',  # Address family constant
-        pf          => '',  # Protocol family constant
-        ip          => '',  # Human-readable textual representation of the ip address
+        ssl_cert_file => undef,
+        ssl_key_file => undef,
+        ssl_ca_file => undef,
+        ssl_verify_mode => SSL_VERIFY_PEER
     }, $class;
 
     exists $p{$_} and $self->{$_} = $p{$_} foreach keys %$self;
@@ -193,8 +201,7 @@ sub new {
     ( $self->{host} ) = $self->{host} =~ /\A(.+)\z/;
     ( $self->{port} ) = $self->{port} =~ /\A(.+)\z/;
 
-    $self->{socket}     = undef;
-    $self->{_io_select} = undef;
+    $self->{socket} = undef;
     my $error;
     try {
         $self->_connect();
@@ -202,9 +209,9 @@ sub new {
         $error = $_;
     };
 
-    $self->_error( $ERROR_CANNOT_BIND, format_message("Kafka::IO::Async(%s:%s)->new: %s", $self->{host}, $self->{port}, $error ) )
-        if defined $error
-    ;
+    $self->_error( $ERROR_CANNOT_BIND, format_message("Kafka::IO::SSL(%s:%s)->new: %s", $self->{host}, $self->{port}, $error ) )
+        if defined $error;
+
     return $self;
 }
 
@@ -242,27 +249,31 @@ sub send {
     ;
 
     my $socket = $self->{socket};
-    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket || $socket->destroyed;
+    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket;
 
-    $socket->wtimeout_reset;
-    $socket->wtimeout($timeout);
-    $socket->on_wtimeout(sub {
-        #my ($h) = @_;
-        $self->close;
+    my $started = Time::HiRes::time();
+
+    
+    undef $!;
+    my $sent = $socket->print($message);
+    
+    my $error = $!;
+
+    unless (defined( $sent ) && $sent == $length ){
         $self->_error(
             $ERROR_CANNOT_SEND,
-            format_message( "Kafka::IO::Async(%s)->send: ERROR='%s' (length=%s, timeout=%s)",
+            format_message( "Kafka::IO(%s)->send: ERROR='%s' (length=%s, sent=%s, timeout=%s, secs=%.6f)",
                 $self->{host},
-                'Write timeout fired',
+                ( $error // '<none>' ) . '',
                 $length,
+                $sent,
                 $timeout,
+                Time::HiRes::time() - $started,
             )
         );
-    });
+    }
 
-    $socket->push_write($message);
-
-    return length($message);
+    return $sent;
 }
 
 =head3 C<< receive( $length <, $timeout> ) >>
@@ -286,45 +297,55 @@ sub receive {
         unless $timeout > 0
     ;
     my $socket = $self->{socket};
-    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket || $socket->destroyed;
+    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket;
 
-    my $message = '';
+    my $started = Time::HiRes::time();
+    my $until = $started + $timeout;
+
     my $error;
-    my $cv = AnyEvent->condvar;
+    my $message = '';
+    my $len_to_read = $length;
+    my $buf = '';
+    my $retries = 0;
+    while ( $len_to_read > 0 && $retries++ < $MAX_RETRIES ) {
+        my $remaining_time = $until - Time::HiRes::time();
+        last if $remaining_time <= 0; # timeout expired
 
-    $socket->rtimeout_reset;
-    $socket->rtimeout($timeout);
-    $socket->on_rtimeout(sub {
-        #my ($h) = @_;
-        $self->close;
-        $error = format_message( "Kafka::IO::Async(%s)->receive: ERROR='%s' (timeout=%s)",
-            $self->{host},
-            'Read timeout fired',
-            $timeout,
+        my $from_recv = $socket->read($buf, $length);
+        
+        if ( defined( $from_recv ) && length( $buf ) ) {
+            $message .= $buf;
+            $len_to_read = $length - length( $message );
+            --$retries; # this attempt was successful, don't count as a retry
+        }
+        if ( my $remaining_attempts = $MAX_RETRIES - $retries ) {
+            $remaining_time = $until - Time::HiRes::time();
+            my $micro_seconds = int( $remaining_time * 1e6 / $remaining_attempts );
+            if ( $micro_seconds > 0 ) {
+                $micro_seconds = 250_000 if $micro_seconds > 250_000; # prevent long sleeps if total remaining time is big
+                $self->_debug_msg( format_message( 'sleeping (remaining attempts %d, time %.6f): %d microseconds', $remaining_attempts, $remaining_time, $micro_seconds ) )
+                    if $self->debug_level;
+                Time::HiRes::usleep( $micro_seconds );
+            }
+        }
+    }
+
+    unless( length( $message ) >= $length )
+    {
+        $self->_error(
+            $ERROR_CANNOT_RECV,
+            format_message( "Kafka::IO(%s)->receive: ERROR='Failed to receive data' (length=%s, received=%s, timeout=%s, secs=%.6f)",
+                $self->{host},
+                $length,
+                length( $message ),
+                $timeout,
+                Time::HiRes::time() - $started,
+            ),
         );
-        $cv->send;
-    });
+    }
+    $self->_debug_msg( $message, 'Response from', 'yellow' )
+        if $self->debug_level >= 2;
 
-    $socket->on_error(sub {
-        my ($h, $fatal, $message) = @_;
-        $self->close if $fatal;
-        $error = format_message( "Kafka::IO::Async(%s)->handle: ERROR='%s' FATAL=%s",
-            $self->{host},
-            $message,
-            $fatal,
-        );
-        $cv->send;
-    });
-
-    $socket->push_read(chunk => $length, sub {
-        my ($h, $data) = @_;
-        $message = $data;
-        $cv->send;
-    });
-
-    $cv->recv;
-    $socket->rtimeout(0);
-    die $error if $error;
 
     return \$message;
 }
@@ -340,54 +361,8 @@ Returns a reference to the received message.
 
 =cut
 
-sub try_receive {
-    my ( $self, $length, $timeout ) = @_;
-    $self->_error( $ERROR_MISMATCH_ARGUMENT, '->receive' )
-        unless $length > 0
-    ;
-    $timeout = $self->{timeout} // $REQUEST_TIMEOUT unless defined $timeout;
-    $self->_error( $ERROR_MISMATCH_ARGUMENT, '->receive' )
-        unless $timeout > 0
-    ;
-    my $socket = $self->{socket};
-    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket || $socket->destroyed;
+*try_receive = \&receive;
 
-    my $message = '';
-    my $error;
-    my $cv = AnyEvent->condvar;
-
-    $socket->rtimeout($timeout);
-    $socket->on_rtimeout(sub {
-        #my ($h) = @_;
-        $self->close;
-        $error = format_message( "Kafka::IO::Async(%s)->receive: ERROR='%s' (timeout=%s)",
-            $self->{host},
-            'Read timeout fired',
-            $timeout,
-        );
-        $cv->send;
-    });
-
-    $socket->on_eof(sub {
-        $message = undef;
-        $cv->send;
-    });
-
-    $socket->on_read(sub {
-        #my ($h, $data) = @_;
-        my ($h) = @_;
-        $message = substr $h->{rbuf}, 0, $length, '';
-        $h->on_read();
-        $h->on_eof();
-        $cv->send;
-    });
-
-    $cv->recv;
-    $socket->rtimeout(0);
-    die $error if $error;
-
-    return \$message;
-}
 
 =head3 C<close>
 
@@ -400,7 +375,7 @@ sub close {
 
     my $ret = 1;
     if ( $self->{socket} ) {
-        $self->{socket}->destroy;
+        $self->{socket}->shutdown(SHUT_RDWR);
         $self->{socket} = undef;
     }
 
@@ -408,60 +383,46 @@ sub close {
 }
 
 
+
+
 #-- private attributes ---------------------------------------------------------
 
 #-- private methods ------------------------------------------------------------
 
-# You need to have access to Kafka instance and be able to connect through TCP.
-# uses http://devpit.org/wiki/Connect%28%29_with_timeout_%28in_Perl%29
+# You need to have access to Kafka instance and be able to connect through secure TCP.
 sub _connect {
     my ( $self ) = @_;
 
-    my $error;
-    $self->{socket}     = undef;
+    $self->{socket} = undef;
 
-    my $name    = $self->{host};
+    my $host    = $self->{host};
     my $port    = $self->{port};
     my $timeout = $self->{timeout};
 
-    my $cv = AnyEvent->condvar;
+    my $sock = IO::Socket::INET->new(
+        Timeout => $timeout,
+        Type => IO::Socket::SOCK_STREAM,
+        proto => 'tcp',
+        PeerPort => $port,
+        PeerHost => $host, 
+    ) || die "Can't open socket: $@";
 
-    my $connection = AnyEvent::Handle->new(
-        connect => [$name, $port],
-        ($timeout ? (on_prepare => sub { $timeout } ) : ()),
-        on_connect => sub {
-            #my ($h, $host, $port, $retry) = @_;
-            $cv->send;
-        },
-        on_connect_error => sub {
-            my ($h, $message) = @_;
-            $error = format_message( "connect host = %s, port = %s: %s\n", $name, $port, $message );
-            $cv->send;
-        },
-        on_error => sub {
-            my ($h, $fatal, $message) = @_;
-            $self->close if $fatal;
-            $self->_error(
-                $ERROR_NO_CONNECTION,
-                format_message( "Kafka::IO::Async(%s)->handle: ERROR='%s' FATAL=%s",
-                    $self->{host},
-                    $message,
-                    $fatal,
-                )
-            );
-        },
-        on_drain => sub {
-            my ($h) = @_;
-            $h->wtimeout(0);
-        }
+    my $error = $SSL_ERROR unless IO::Socket::SSL->start_SSL(
+        $sock,
+        SSL_verify_mode => $self->{ssl_verify_mode},
+        SSL_cert_file => $self->{ssl_cert_file},
+        SSL_key_file => $self->{ssl_key_file},
+        SSL_ca_file => $self->{ssl_ca_file}
     );
 
-    $cv->recv;
+    $self->_error( $ERROR_NO_CONNECTION, $error ) if $error;
+    
+    # Set autoflushing.
+    $sock->autoflush(1);
 
-    die $error if $error;
+    $self->{socket} = $sock;
 
-    $self->{socket} = $connection;
-    return $connection;
+    return $sock;
 }
 
 
@@ -517,7 +478,7 @@ sub _error {
     my $self = shift;
     my %args = throw_args( @_ );
     $self->_debug_msg( format_message( 'throwing IO error %s: %s', $args{code}, $args{message} ) )
-        if $self->debug_level;
+        if $self->debug_level || 1;
     Kafka::Exception::IO->throw( %args );
 }
 
@@ -539,7 +500,7 @@ for the list of all available methods.
 Authors suggest using of L<Try::Tiny|Try::Tiny>'s C<try> and C<catch> to handle exceptions while
 working with L<Kafka|Kafka> package.
 
-Here is the list of possible error messages that C<Kafka::IO::Async> may produce:
+Here is the list of possible error messages that C<Kafka::IO::SSL> may produce:
 
 =over 3
 
@@ -549,7 +510,7 @@ Invalid arguments were passed to a method.
 
 =item C<Cannot send>
 
-Message cannot be sent on a C<Kafka::IO::Async> object socket.
+Message cannot be sent on a C<Kafka::IO::SSL> object socket.
 
 =item C<Cannot receive>
 
@@ -570,7 +531,7 @@ C<PERL_KAFKA_DEBUG=1>     - debug is enabled for the whole L<Kafka|Kafka> packag
 
 C<PERL_KAFKA_DEBUG=IO:1>  - enable debug for C<Kafka::IO::Async> only.
 
-C<Kafka::IO::Async> supports two debug levels (level 2 includes debug output of 1):
+C<Kafka::IO::SSL> supports two debug levels (level 2 includes debug output of 1):
 
 =over 3
 

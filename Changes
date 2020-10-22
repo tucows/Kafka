@@ -1,5 +1,8 @@
 Revision history for Kafka package
 
+1.09
+    Add support for SSL communication 
+
 1.08
     Add support SASL authentication support
 

@@ -18,6 +18,7 @@ build_requires:
   IO::File: '1.14'
   IO::Socket::INET: '1.31'
   IO::Socket::IP: '0.37'
+  IO::Socket::SSL: '2.04'
   List::Util: '1.19'
   Net::EmptyPort: '0'
   Params::Util: '1.07'
@@ -73,37 +74,37 @@ no_index:
 provides:
   Kafka:
     file: lib/Kafka.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Connection:
     file: lib/Kafka/Connection.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Consumer:
     file: lib/Kafka/Consumer.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Exceptions:
     file: lib/Kafka/Exceptions.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::IO:
     file: lib/Kafka/IO.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::IO::Async:
     file: lib/Kafka/IO/Async.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Int64:
     file: lib/Kafka/Int64.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Internals:
     file: lib/Kafka/Internals.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Message:
     file: lib/Kafka/Message.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Producer:
     file: lib/Kafka/Producer.pm
-    version: '1.08'
+    version: '1.09'
   Kafka::Protocol:
     file: lib/Kafka/Protocol.pm
-    version: '1.08'
+    version: '1.09'
 requires:
   AnyEvent: '7.17'
   Authen::SCRAM: '0'
@@ -119,6 +120,7 @@ requires:
   Exporter: '5.62'
   Gzip::Faster: '0.19'
   IO::Select: '1.17'
+  IO::Socket::SSL: '2.04'
   List::Util: '1.19'
   Params::Util: '1.07'
   Scalar::Util: '1.19'
@@ -133,4 +135,4 @@ resources:
   bugtracker: https://github.com/TrackingSoft/Kafka/issues
   homepage: https://github.com/TrackingSoft/Kafka
   repository: https://github.com/TrackingSoft/Kafka.git
-version: '1.08'
+version: '1.09'

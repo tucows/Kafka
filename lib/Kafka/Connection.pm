@@ -6,7 +6,7 @@ Kafka::Connection - Object interface to connect to a kafka cluster.
 
 =head1 VERSION
 
-This documentation refers to C<Kafka::Connection> version 1.08 .
+This documentation refers to C<Kafka::Connection> version 1.09 .
 
 =cut
 
@@ -16,7 +16,7 @@ use warnings;
 
 our $DEBUG = 0;
 
-our $VERSION = 'v1.08';
+our $VERSION = 'v1.09';
 
 use Exporter qw(
     import
@@ -129,6 +129,7 @@ use Kafka::Internals qw(
 );
 use Kafka::IO;
 use Kafka::IO::Async;
+use Kafka::IO::SSL;
 use Kafka::Protocol qw(
     $BAD_OFFSET
     $IMPLEMENTED_APIVERSIONS
@@ -451,6 +452,11 @@ sub new {
         broker_list             => [],
         Timeout                 => $REQUEST_TIMEOUT,
         async                   => 0,
+        ssl                     => 0,
+        ssl_cert_file           => undef,
+        ssl_key_file            => undef,
+        ssl_ca_file             => undef,
+        ssl_verify_mode         => undef,
         ip_version              => undef,
         SEND_MAX_ATTEMPTS       => $SEND_MAX_ATTEMPTS,
         RETRY_BACKOFF           => $RETRY_BACKOFF,
@@ -1579,13 +1585,15 @@ sub _connectIO {
     ;
     unless( $server_data->{IO} ) {
         my $error;
-        my $io_class = $self->{async} ? 'Kafka::IO::Async' : 'Kafka::IO';
+        my $io_class = $self->{async} ? 'Kafka::IO::Async' : $self->{ssl}? 'Kafka::IO::SSL' : 'Kafka::IO';
         try {
             $server_data->{IO} = $io_class->new(
                 host        => $server_data->{host},
                 port        => $server_data->{port},
                 timeout     => $self->{Timeout},
                 ip_version  => $self->{ip_version},
+                # add all ssl configs if needed
+                ($self->{ssl}? map {$_ => $self->{$_}} grep {$_ =~ m/^ssl_/} keys %$self:())
             );
             $server_data->{error} = undef;
         } catch {
