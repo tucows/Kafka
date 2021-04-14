@@ -1,0 +1,5 @@
+libkafka-perl (1.09-1) unstable; urgency=low
+
+  * Initial Release.
+
+ -- sleminov <sleminov@jenkins-master01.qa.tucows.net>  Tue, 20 Oct 2020 13:57:01 -0400

@@ -1,0 +1,18 @@
+Package: libkafka-perl
+Version: 1.09-1
+Architecture: all
+Maintainer: sleminov <sleminov@jenkins-master01.qa.tucows.net>
+Installed-Size: 455
+Depends: perl, libanyevent-perl (>= 7.17), libauthen-scram-perl, libcompress-lz4frame-perl (>= 0.012001), libcompress-snappy-perl (>= 0.23), libconst-fast-perl (>= 0.014), libdata-compare-perl (>= 1.24), libdata-hexdump-range-perl, libdata-validate-domain-perl (>= 0.11), libdata-validate-ip-perl (>= 0.24), libexception-class-perl (>= 1.37), libgzip-faster-perl (>= 0.19), libio-socket-ssl-perl (>= 2.04), libparams-util-perl (>= 1.07), libscalar-util-numeric-perl (>= 0.22), libstring-crc32-perl (>= 1.5), libsys-sigaction-perl (>= 0.21), libtry-tiny-perl (>= 0.21)
+Section: perl
+Priority: optional
+Homepage: https://metacpan.org/release/Kafka
+Description: Apache Kafka low-level synchronous API, which does not use Zookeeper.
+ The user modules in this package provide an object oriented API. The IO
+ agents, requests sent, and responses received from the Apache Kafka or mock
+ servers are all represented by objects. This makes a simple and powerful
+ interface to these services.
+ .
+ The main features of the package are:
+ .
+ This description was automagically extracted from the module by dh-make-perl.

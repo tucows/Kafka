@@ -1,0 +1,25 @@
+language: perl
+
+perl:
+    - "5.22"
+
+jdk:
+    - oraclejdk8
+
+env:
+    global:
+        - RELEASE_TESTS=1
+        - KAFKA_BASE_DIR="${TRAVIS_BUILD_DIR}/kafka"
+
+cache:
+    directories:
+        - vendor
+        - perl_modules
+
+before_install:
+    - ./install_kafka.sh
+    - cpanm local::lib
+    - eval "$(perl -Mlocal::lib=${PWD}/perl_modules)"
+    - cpanm --notest Test::Distribution
+    - cpanm --notest Test::Kwalitee
+    - cpanm --notest Test::Kwalitee::Extra

@@ -1,0 +1,83 @@
+Source: libkafka-perl
+Section: perl
+Priority: optional
+Maintainer: sleminov <sleminov@jenkins-master01.qa.tucows.net>
+Build-Depends: debhelper (>= 9),
+ libmodule-build-perl,
+ perl
+Build-Depends-Indep: libanyevent-perl (>= 7.17),
+ libauthen-scram-perl,
+ libcapture-tiny-perl (>= 0.24),
+ libclone-perl (>= 0.36),
+ libcompress-lz4frame-perl (>= 0.012001),
+ libcompress-snappy-perl (>= 0.23),
+ libconfig-inifiles-perl (>= 2.83),
+ libconst-fast-perl (>= 0.014),
+ libdata-compare-perl (>= 1.24),
+ libdata-hexdump-range-perl,
+ libdata-validate-domain-perl (>= 0.11),
+ libdata-validate-ip-perl (>= 0.24),
+ libexception-class-perl (>= 1.37),
+ libfile-homedir-perl (>= 1.00),
+ libgzip-faster-perl (>= 0.19),
+ libio-socket-ssl-perl (>= 2.04),
+ libmodule-build-tiny-perl (>= 0.034),
+ libparams-util-perl (>= 1.07),
+ libproc-daemon-perl (>= 0.14),
+ libproc-processtable-perl (>= 0.51),
+ libscalar-util-numeric-perl (>= 0.22),
+ libstring-crc32-perl (>= 1.5),
+ libsub-install-perl (>= 0.927),
+ libsys-sigaction-perl (>= 0.21),
+ libtest-deep-perl (>= 0.119),
+ libtest-dist-versionsync-perl,
+ libtest-distribution-perl,
+ libtest-eol-perl,
+ libtest-exception-perl (>= 0.32),
+ libtest-fixme-perl,
+ libtest-kwalitee-perl,
+ libtest-minimumversion-perl,
+ libtest-mojibake-perl,
+ libtest-notabs-perl,
+ libtest-nowarnings-perl (>= 1.04),
+ libtest-perl-critic-perl,
+ libtest-pureascii-perl,
+ libtest-spelling-perl,
+ libtest-strict-perl,
+ libtest-synopsis-perl,
+ libtest-tcp-perl (>= 2.08),
+ libtest-vars-perl,
+ libtest-version-perl,
+ libtry-tiny-perl (>= 0.21)
+Standards-Version: 3.9.8
+Homepage: https://metacpan.org/release/Kafka
+
+Package: libkafka-perl
+Architecture: all
+Depends: ${misc:Depends}, ${perl:Depends},
+ libanyevent-perl (>= 7.17),
+ libauthen-scram-perl,
+ libcompress-lz4frame-perl (>= 0.012001),
+ libcompress-snappy-perl (>= 0.23),
+ libconst-fast-perl (>= 0.014),
+ libdata-compare-perl (>= 1.24),
+ libdata-hexdump-range-perl,
+ libdata-validate-domain-perl (>= 0.11),
+ libdata-validate-ip-perl (>= 0.24),
+ libexception-class-perl (>= 1.37),
+ libgzip-faster-perl (>= 0.19),
+ libio-socket-ssl-perl (>= 2.04),
+ libparams-util-perl (>= 1.07),
+ libscalar-util-numeric-perl (>= 0.22),
+ libstring-crc32-perl (>= 1.5),
+ libsys-sigaction-perl (>= 0.21),
+ libtry-tiny-perl (>= 0.21)
+Description: Apache Kafka low-level synchronous API, which does not use Zookeeper.
+ The user modules in this package provide an object oriented API. The IO
+ agents, requests sent, and responses received from the Apache Kafka or mock
+ servers are all represented by objects. This makes a simple and powerful
+ interface to these services.
+ .
+ The main features of the package are:
+ .
+ This description was automagically extracted from the module by dh-make-perl.

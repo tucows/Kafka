@@ -1,0 +1,1 @@
+[[],["--installdirs","vendor","--config","optimize=-g -O2 -fdebug-prefix-map=/home/sleminov/Kafka=. -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2","--config","ld=x86_64-linux-gnu-gcc -g -O2 -fdebug-prefix-map=/home/sleminov/Kafka=. -fstack-protector-strong -Wformat -Werror=format-security -Wl,-z,relro"]]
