@@ -53,7 +53,13 @@ use Kafka::Internals qw(
 use IO::Socket::SSL;
 use IO::Socket;
 use Data::Dumper;
-
+use Errno qw(
+    EAGAIN
+    ECONNRESET
+    EINTR
+    EWOULDBLOCK
+    ETIMEDOUT
+);
 =head1 SYNOPSIS
 
     use 5.010;
@@ -252,19 +258,54 @@ sub send {
     $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket;
 
     my $started = Time::HiRes::time();
+    my $until = $started + $timeout;
 
-    
-    undef $!;
-    my $sent = $socket->print($message);
-    
-    my $error = $!;
+    my $sent = 0;
+    my $errno;
+    my $retries = 0; 
+    my $interrupts = 0; 
+    ATTEMPT: while ( $sent < $length && $retries++ < $MAX_RETRIES ) {
+        my $remaining_time = $until - Time::HiRes::time();
+        last ATTEMPT if $remaining_time <= 0; # timeout expired
+
+        undef $!;
+        my $wrote = $socket->print($message);
+        $errno = $!;
+
+        if( defined $wrote && $wrote > 0 ) {
+            $sent += $wrote;
+            if ( $sent < $length ) {
+                # remove written data from message
+                $message = substr( $message, $wrote );
+            }
+        }
+
+        if( $errno ) {
+            if( $errno == EINTR ) {
+                undef $errno;
+                --$retries; # this attempt does not count
+                ++$interrupts;
+                next ATTEMPT;
+            } elsif (
+                       $errno != EAGAIN
+                    && $errno != EWOULDBLOCK
+                    ## on freebsd, if we got ECONNRESET, it's a timeout from the other side
+                    && !( $errno == ECONNRESET && $^O eq 'freebsd' )
+                ) {
+                $self->close;
+                last ATTEMPT;
+            }
+        }
+
+        last ATTEMPT unless defined $wrote;
+    }
 
     unless (defined( $sent ) && $sent == $length ){
         $self->_error(
             $ERROR_CANNOT_SEND,
             format_message( "Kafka::IO(%s)->send: ERROR='%s' (length=%s, sent=%s, timeout=%s, secs=%.6f)",
                 $self->{host},
-                ( $error // '<none>' ) . '',
+                ( $errno // '<none>' ) . '',
                 $length,
                 $sent,
                 $timeout,
@@ -477,8 +518,7 @@ sub _debug_msg {
 sub _error {
     my $self = shift;
     my %args = throw_args( @_ );
-    $self->_debug_msg( format_message( 'throwing IO error %s: %s', $args{code}, $args{message} ) )
-        if $self->debug_level || 1;
+    $self->_debug_msg( format_message( 'throwing SSL IO error %s: %s', $args{code}, $args{message} ) );
     Kafka::Exception::IO->throw( %args );
 }
 
