@@ -198,9 +198,11 @@ sub new {
         ssl_cert_file => undef,
         ssl_key_file => undef,
         ssl_ca_file => undef,
+        ssl_cert => undef,
+        ssl_key => undef,
+        ssl_ca => undef,
         ssl_verify_mode => SSL_VERIFY_PEER
     }, $class;
-
     exists $p{$_} and $self->{$_} = $p{$_} foreach keys %$self;
 
     # we trust it: make it untainted
@@ -451,9 +453,9 @@ sub _connect {
     my $error = $SSL_ERROR unless IO::Socket::SSL->start_SSL(
         $sock,
         SSL_verify_mode => $self->{ssl_verify_mode},
-        SSL_cert_file => $self->{ssl_cert_file},
-        SSL_key_file => $self->{ssl_key_file},
-        SSL_ca_file => $self->{ssl_ca_file}
+        (($self->{ssl_cert})? (SSL_cert => $self->{ssl_cert}) : (SSL_cert_file => $self->{ssl_cert_file})),
+        (($self->{ssl_key})? (SSL_key => $self->{ssl_key}) : (SSL_key_file => $self->{ssl_key_file})),
+        (($self->{ssl_ca})? (SSL_ca => $self->{ssl_ca}) : (SSL_ca_file => $self->{ssl_ca_file})),
     );
 
     $self->_error( $ERROR_NO_CONNECTION, $error ) if $error;
