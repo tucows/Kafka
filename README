@@ -40,6 +40,7 @@ Kafka:
    Exporter
    Gzip::Faster
    IO::Select
+   IO::Socket::SSL
    List::Util
    Params::Util
    Scalar::Util
