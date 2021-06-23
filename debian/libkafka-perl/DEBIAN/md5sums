@@ -1,7 +1,7 @@
 f980c64329ac1d6c9c50872151c58934  usr/share/doc/libkafka-perl/README.md.gz
-981870447559ea409b4dfacc49c4ceb6  usr/share/doc/libkafka-perl/changelog.Debian.gz
+d43e5142a938d8ffa6318982db33a5ce  usr/share/doc/libkafka-perl/changelog.Debian.gz
 82ac9f6b0f32de2eb7dcc0f40847ea9e  usr/share/doc/libkafka-perl/changelog.gz
-d8bd4eab492e0aa747b9ef85e4833175  usr/share/doc/libkafka-perl/copyright
+45009005e35a8bc1a86f78fe52ad8b66  usr/share/doc/libkafka-perl/copyright
 6c9f07b53854ad36c4680d30e23a3b76  usr/share/man/man3/Kafka.3pm.gz
 20df3f101735521dcf3d741c6501b98c  usr/share/man/man3/Kafka::Connection.3pm.gz
 e8e0be573a74a6a2ae3f82e2a58cc050  usr/share/man/man3/Kafka::Consumer.3pm.gz
@@ -14,13 +14,13 @@ a912723b61bec48df378c2cc9ee2f59f  usr/share/man/man3/Kafka::Internals.3pm.gz
 a54ea0d627546662815ad9ad026ca24d  usr/share/man/man3/Kafka::Message.3pm.gz
 4852a873cce19851fdade9f6b178dd82  usr/share/man/man3/Kafka::Producer.3pm.gz
 3181b255ea665122b2a788a8adb82541  usr/share/man/man3/Kafka::Protocol.3pm.gz
-593796597a9f4c52ede19033198d7f11  usr/share/perl5/Kafka.pm
-454a95f4d4c7e43ba17d9f639afc3b94  usr/share/perl5/Kafka/Connection.pm
+8afd61f7da1c4361ad6a400004306b7a  usr/share/perl5/Kafka.pm
+9c5e9d3c9f49fce5c4f5eb42abcd638f  usr/share/perl5/Kafka/Connection.pm
 3eb4cd48f3e05961c9e24df5068f5921  usr/share/perl5/Kafka/Consumer.pm
 73c5c7e934070feae9dada531f6098f9  usr/share/perl5/Kafka/Exceptions.pm
 89c260c9dd0c99c22cf1d96e858b105c  usr/share/perl5/Kafka/IO.pm
 c0622a9284749b4b5062c1476a0636dd  usr/share/perl5/Kafka/IO/Async.pm
-e0922949fabd4d63609e55e8bb873089  usr/share/perl5/Kafka/IO/SSL.pm
+8951280e6ecd64d920bfbfd00a0d1d47  usr/share/perl5/Kafka/IO/SSL.pm
 155c5cc33267689e081ef459a67500c3  usr/share/perl5/Kafka/Int64.pm
 ad0efd4403a8fe361ecdd6d16b5b516d  usr/share/perl5/Kafka/Internals.pm
 d45063527b3094ecce9500e96f6bfa15  usr/share/perl5/Kafka/Message.pm

@@ -2,8 +2,8 @@ Package: libkafka-perl
 Version: 1.09-1
 Architecture: all
 Maintainer: sleminov <sleminov@jenkins-master01.qa.tucows.net>
-Installed-Size: 455
-Depends: perl, libanyevent-perl (>= 7.17), libauthen-scram-perl, libcompress-lz4frame-perl (>= 0.012001), libcompress-snappy-perl (>= 0.23), libconst-fast-perl (>= 0.014), libdata-compare-perl (>= 1.24), libdata-hexdump-range-perl, libdata-validate-domain-perl (>= 0.11), libdata-validate-ip-perl (>= 0.24), libexception-class-perl (>= 1.37), libgzip-faster-perl (>= 0.19), libio-socket-ssl-perl (>= 2.04), libparams-util-perl (>= 1.07), libscalar-util-numeric-perl (>= 0.22), libstring-crc32-perl (>= 1.5), libsys-sigaction-perl (>= 0.21), libtry-tiny-perl (>= 0.21)
+Installed-Size: 456
+Depends: perl
 Section: perl
 Priority: optional
 Homepage: https://metacpan.org/release/Kafka

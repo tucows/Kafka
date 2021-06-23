@@ -17,7 +17,7 @@ use 5.010;
 use strict;
 use warnings;
 
-
+use base "Kafka::IO";
 
 our $DEBUG = 0;
 
@@ -52,6 +52,7 @@ use Kafka::Internals qw(
 );
 use IO::Socket::SSL;
 use IO::Socket;
+use IO::Select;
 use Data::Dumper;
 use Errno qw(
     EAGAIN
@@ -198,9 +199,11 @@ sub new {
         ssl_cert_file => undef,
         ssl_key_file => undef,
         ssl_ca_file => undef,
+        ssl_cert => undef,
+        ssl_key => undef,
+        ssl_ca => undef,
         ssl_verify_mode => SSL_VERIFY_PEER
     }, $class;
-
     exists $p{$_} and $self->{$_} = $p{$_} foreach keys %$self;
 
     # we trust it: make it untainted
@@ -229,181 +232,6 @@ The following methods are provided by C<Kafka::IO::Async> class:
 
 =cut
 
-=head3 C<< send( $message <, $timeout> ) >>
-
-Sends a C<$message> to Kafka.
-
-The argument must be a bytes string.
-
-Use optional C<$timeout> argument to override default timeout for this request only.
-
-Returns the number of characters sent.
-
-=cut
-sub send {
-    my ( $self, $message, $timeout ) = @_;
-    $self->_error( $ERROR_MISMATCH_ARGUMENT, '->send' )
-        unless defined( _STRING( $message ) )
-    ;
-    my $length = length( $message );
-    $self->_error( $ERROR_MISMATCH_ARGUMENT, '->send' )
-        unless $length <= $MAX_SOCKET_REQUEST_BYTES
-    ;
-    $timeout = $self->{timeout} // $REQUEST_TIMEOUT unless defined $timeout;
-    $self->_error( $ERROR_MISMATCH_ARGUMENT, '->send' )
-        unless $timeout > 0
-    ;
-
-    my $socket = $self->{socket};
-    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket;
-
-    my $started = Time::HiRes::time();
-    my $until = $started + $timeout;
-
-    my $sent = 0;
-    my $errno;
-    my $retries = 0; 
-    my $interrupts = 0; 
-    ATTEMPT: while ( $sent < $length && $retries++ < $MAX_RETRIES ) {
-        my $remaining_time = $until - Time::HiRes::time();
-        last ATTEMPT if $remaining_time <= 0; # timeout expired
-
-        undef $!;
-        my $wrote = $socket->print($message);
-        $errno = $!;
-
-        if( defined $wrote && $wrote > 0 ) {
-            $sent += $wrote;
-            if ( $sent < $length ) {
-                # remove written data from message
-                $message = substr( $message, $wrote );
-            }
-        }
-
-        if( $errno ) {
-            if( $errno == EINTR ) {
-                undef $errno;
-                --$retries; # this attempt does not count
-                ++$interrupts;
-                next ATTEMPT;
-            } elsif (
-                       $errno != EAGAIN
-                    && $errno != EWOULDBLOCK
-                    ## on freebsd, if we got ECONNRESET, it's a timeout from the other side
-                    && !( $errno == ECONNRESET && $^O eq 'freebsd' )
-                ) {
-                $self->close;
-                last ATTEMPT;
-            }
-        }
-
-        last ATTEMPT unless defined $wrote;
-    }
-
-    unless (defined( $sent ) && $sent == $length ){
-        $self->_error(
-            $ERROR_CANNOT_SEND,
-            format_message( "Kafka::IO(%s)->send: ERROR='%s' (length=%s, sent=%s, timeout=%s, secs=%.6f)",
-                $self->{host},
-                ( $errno // '<none>' ) . '',
-                $length,
-                $sent,
-                $timeout,
-                Time::HiRes::time() - $started,
-            )
-        );
-    }
-
-    return $sent;
-}
-
-=head3 C<< receive( $length <, $timeout> ) >>
-
-Receives a message up to C<$length> size from Kafka.
-
-C<$length> argument must be a positive number.
-
-Use optional C<$timeout> argument to override default timeout for this call only.
-
-Returns a reference to the received message.
-
-=cut
-sub receive {
-    my ( $self, $length, $timeout ) = @_;
-    $self->_error( $ERROR_MISMATCH_ARGUMENT, '->receive' )
-        unless $length > 0
-    ;
-    $timeout = $self->{timeout} // $REQUEST_TIMEOUT unless defined $timeout;
-    $self->_error( $ERROR_MISMATCH_ARGUMENT, '->receive' )
-        unless $timeout > 0
-    ;
-    my $socket = $self->{socket};
-    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket;
-
-    my $started = Time::HiRes::time();
-    my $until = $started + $timeout;
-
-    my $error;
-    my $message = '';
-    my $len_to_read = $length;
-    my $buf = '';
-    my $retries = 0;
-    while ( $len_to_read > 0 && $retries++ < $MAX_RETRIES ) {
-        my $remaining_time = $until - Time::HiRes::time();
-        last if $remaining_time <= 0; # timeout expired
-
-        my $from_recv = $socket->read($buf, $length);
-        
-        if ( defined( $from_recv ) && length( $buf ) ) {
-            $message .= $buf;
-            $len_to_read = $length - length( $message );
-            --$retries; # this attempt was successful, don't count as a retry
-        }
-        if ( my $remaining_attempts = $MAX_RETRIES - $retries ) {
-            $remaining_time = $until - Time::HiRes::time();
-            my $micro_seconds = int( $remaining_time * 1e6 / $remaining_attempts );
-            if ( $micro_seconds > 0 ) {
-                $micro_seconds = 250_000 if $micro_seconds > 250_000; # prevent long sleeps if total remaining time is big
-                $self->_debug_msg( format_message( 'sleeping (remaining attempts %d, time %.6f): %d microseconds', $remaining_attempts, $remaining_time, $micro_seconds ) )
-                    if $self->debug_level;
-                Time::HiRes::usleep( $micro_seconds );
-            }
-        }
-    }
-
-    unless( length( $message ) >= $length )
-    {
-        $self->_error(
-            $ERROR_CANNOT_RECV,
-            format_message( "Kafka::IO(%s)->receive: ERROR='Failed to receive data' (length=%s, received=%s, timeout=%s, secs=%.6f)",
-                $self->{host},
-                $length,
-                length( $message ),
-                $timeout,
-                Time::HiRes::time() - $started,
-            ),
-        );
-    }
-    $self->_debug_msg( $message, 'Response from', 'yellow' )
-        if $self->debug_level >= 2;
-
-
-    return \$message;
-}
-
-=head3 C<< try_receive( $length <, $timeout> ) >>
-Receives a message up to C<$length> size from Kafka.
-
-C<$length> argument must be a positive number.
-
-Use optional C<$timeout> argument to override default timeout for this call only.
-
-Returns a reference to the received message.
-
-=cut
-
-*try_receive = \&receive;
-
 
 =head3 C<close>
 
@@ -418,6 +246,7 @@ sub close {
     if ( $self->{socket} ) {
         $self->{socket}->shutdown(SHUT_RDWR);
         $self->{socket} = undef;
+        $self->{_io_select} = undef;
     }
 
     return $ret;
@@ -429,6 +258,19 @@ sub close {
 #-- private attributes ---------------------------------------------------------
 
 #-- private methods ------------------------------------------------------------
+
+sub _send {
+    my ( $self, $message ) = @_;
+    return $self->{socket}->print($message);;
+}
+
+sub _recv {
+    my ( $self, $len_to_read ) = @_;
+    my $buf = '';
+    my $from_recv = $self->{socket}->read($buf, $len_to_read);
+    return $from_recv, $buf;
+}
+
 
 # You need to have access to Kafka instance and be able to connect through secure TCP.
 sub _connect {
@@ -451,9 +293,9 @@ sub _connect {
     my $error = $SSL_ERROR unless IO::Socket::SSL->start_SSL(
         $sock,
         SSL_verify_mode => $self->{ssl_verify_mode},
-        SSL_cert_file => $self->{ssl_cert_file},
-        SSL_key_file => $self->{ssl_key_file},
-        SSL_ca_file => $self->{ssl_ca_file}
+        (($self->{ssl_cert})? (SSL_cert => $self->{ssl_cert}) : (SSL_cert_file => $self->{ssl_cert_file})),
+        (($self->{ssl_key})? (SSL_key => $self->{ssl_key}) : (SSL_key_file => $self->{ssl_key_file})),
+        (($self->{ssl_ca})? (SSL_ca => $self->{ssl_ca}) : (SSL_ca_file => $self->{ssl_ca_file})),
     );
 
     $self->_error( $ERROR_NO_CONNECTION, $error ) if $error;
@@ -462,64 +304,18 @@ sub _connect {
     $sock->autoflush(1);
 
     $self->{socket} = $sock;
+    my $s = $self->{_io_select} = IO::Select->new;
+    $s->add( $self->{socket} );
 
     return $sock;
 }
 
 
-# Show additional debugging information
-sub _debug_msg {
-    my ( $self, $message, $header, $colour ) = @_;
-
-    if ( $header ) {
-        unless ( $_hdr ) {
-            require Data::HexDump::Range;
-            $_hdr = Data::HexDump::Range->new(
-                FORMAT                          => 'ANSI',  # 'ANSI'|'ASCII'|'HTML'
-                COLOR                           => 'bw',    # 'bw' | 'cycle'
-                OFFSET_FORMAT                   => 'hex',   # 'hex' | 'dec'
-                DATA_WIDTH                      => 16,      # 16 | 20 | ...
-                DISPLAY_RANGE_NAME              => 0,
-#                MAXIMUM_RANGE_NAME_SIZE         => 16,
-                DISPLAY_COLUMN_NAMES            => 1,
-                DISPLAY_RULER                   => 1,
-                DISPLAY_OFFSET                  => 1,
-#                DISPLAY_CUMULATIVE_OFFSET       => 1,
-                DISPLAY_ZERO_SIZE_RANGE_WARNING => 0,
-                DISPLAY_ZERO_SIZE_RANGE         => 1,
-                DISPLAY_RANGE_NAME              => 0,
-#                DISPLAY_RANGE_SIZE              => 1,
-                DISPLAY_ASCII_DUMP              => 1,
-                DISPLAY_HEX_DUMP                => 1,
-#                DISPLAY_DEC_DUMP                => 1,
-#                COLOR_NAMES                     => {},
-                ORIENTATION                     => 'horizontal',
-            );
-        }
-
-        say STDERR
-            "# $header ", $self->{host}, ':', $self->{port}, "\n",
-            '# Hex Stream: ', unpack( 'H*', $message ), "\n",
-            $_hdr->dump(
-                [
-                    [ 'data', length( $message ), $colour ],
-                ],
-                $message
-            )
-        ;
-    } else {
-        say STDERR format_message( '[%s] %s', scalar( localtime ), $message );
-    }
-
-    return;
-}
-
 # Handler for errors
 sub _error {
     my $self = shift;
     my %args = throw_args( @_ );
-    $self->_debug_msg( format_message( 'throwing SSL IO error %s: %s', $args{code}, $args{message} ) )
-        if $self->debug_level || 1;
+    $self->_debug_msg( format_message( 'throwing SSL IO error %s: %s', $args{code}, $args{message} ) ) if $self->debug_level || 1;
     Kafka::Exception::IO->throw( %args );
 }
 
@@ -527,7 +323,6 @@ sub _error {
 
 1;
 
-__END__
 
 =head1 DIAGNOSTICS
 

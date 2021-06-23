@@ -327,7 +327,7 @@ sub send {
             }
 
             undef $!;
-            my $wrote = CORE::send( $self->{socket}, $message, MSG_DONTWAIT );
+            my $wrote = $self->_send($message);
             $errno = $!;
 
             if( defined $wrote && $wrote > 0 ) {
@@ -435,8 +435,10 @@ sub receive {
 
         if ( $can_read ) {
             my $buf = '';
+            my $from_recv;
+
             undef $!;
-            my $from_recv = CORE::recv( $self->{socket}, $buf, $len_to_read, MSG_DONTWAIT );
+            ($from_recv, $buf) = $self->_recv($len_to_read);
             $errno = $!;
 
             if ( defined( $from_recv ) && length( $buf ) ) {
@@ -577,6 +579,19 @@ sub _is_alive {
 #-- private attributes ---------------------------------------------------------
 
 #-- private methods ------------------------------------------------------------
+    
+
+sub _send {
+    my ( $self, $message ) = @_;
+    return CORE::send( $self->{socket}, $message, MSG_DONTWAIT );
+}
+
+sub _recv {
+    my ( $self, $len_to_read ) = @_;
+    my $buf = '';
+    my $from_recv = CORE::recv( $self->{socket}, $buf, $len_to_read, MSG_DONTWAIT );
+    return $from_recv, $buf;
+}
 
 # You need to have access to Kafka instance and be able to connect through TCP.
 # uses http://devpit.org/wiki/Connect%28%29_with_timeout_%28in_Perl%29
