@@ -252,7 +252,18 @@ sub close {
     return $ret;
 }
 
-
+sub _is_close_wait {
+    my ( $self ) = @_;
+    return 1 unless $self->{socket} && $self->{_io_select}; # closed already
+    # http://stefan.buettcher.org/cs/conn_closed.html
+    # socket is open; check if we can read, and if we can but recv() cannot peek, it means we got EOF
+    return unless $self->{_io_select}->can_read( 0 ); # we cannot read, but may be able to write
+    my $buf = '';
+    undef $!;
+    my $status = $self->{socket}->peek($buf, 1); # peek, do not remove data from queue
+    # EOF when there is no error, status is defined, but result is empty
+    return ! $! && defined $status && length( $buf ) == 0;
+}
 
 
 #-- private attributes ---------------------------------------------------------
