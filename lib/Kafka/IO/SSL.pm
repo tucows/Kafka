@@ -52,6 +52,7 @@ use Kafka::Internals qw(
 );
 use IO::Socket::SSL;
 use IO::Socket;
+use IO::Select;
 use Data::Dumper;
 use Errno qw(
     EAGAIN
@@ -257,12 +258,14 @@ sub send {
     ;
 
     my $socket = $self->{socket};
-    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket;
+    my $select = $self->{_io_select};
+    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) unless $select;
 
     my $started = Time::HiRes::time();
     my $until = $started + $timeout;
 
     my $sent = 0;
+    my $error_code;
     my $errno;
     my $retries = 0; 
     my $interrupts = 0; 
@@ -271,46 +274,74 @@ sub send {
         last ATTEMPT if $remaining_time <= 0; # timeout expired
 
         undef $!;
-        my $wrote = $socket->print($message);
+        my $can_write = $select->can_write( $remaining_time );
         $errno = $!;
-
-        if( defined $wrote && $wrote > 0 ) {
-            $sent += $wrote;
-            if ( $sent < $length ) {
-                # remove written data from message
-                $message = substr( $message, $wrote );
-            }
-        }
-
-        if( $errno ) {
-            if( $errno == EINTR ) {
+        if ( $errno ) {
+            if ( $errno == EINTR ) {
                 undef $errno;
                 --$retries; # this attempt does not count
                 ++$interrupts;
                 next ATTEMPT;
-            } elsif (
-                       $errno != EAGAIN
-                    && $errno != EWOULDBLOCK
-                    ## on freebsd, if we got ECONNRESET, it's a timeout from the other side
-                    && !( $errno == ECONNRESET && $^O eq 'freebsd' )
-                ) {
-                $self->close;
-                last ATTEMPT;
             }
+
+            $self->close;
+
+            last ATTEMPT;
         }
 
-        last ATTEMPT unless defined $wrote;
+        if ( $can_write ) {
+            # check for EOF on the first attempt only
+            if ( $retries == 1 && $self->_is_close_wait ) {
+                $self->close;
+                $error_code = $ERROR_NO_CONNECTION;
+                last ATTEMPT;
+            }
+
+            undef $!;
+            my $wrote = $socket->print($message);
+            $errno = $!;
+
+            if( defined $wrote && $wrote > 0 ) {
+                $sent += $wrote;
+                if ( $sent < $length ) {
+                    # remove written data from message
+                    $message = substr( $message, $wrote );
+                }
+            }
+
+            if( $errno ) {
+                if( $errno == EINTR ) {
+                    undef $errno;
+                    --$retries; # this attempt does not count
+                    ++$interrupts;
+                    next ATTEMPT;
+                } elsif (
+                           $errno != EAGAIN
+                        && $errno != EWOULDBLOCK
+                        ## on freebsd, if we got ECONNRESET, it's a timeout from the other side
+                        && !( $errno == ECONNRESET && $^O eq 'freebsd' )
+                    ) {
+                    $self->close;
+                    last ATTEMPT;
+                }
+            }
+
+            last ATTEMPT unless defined $wrote;
+        }
     }
 
     unless (defined( $sent ) && $sent == $length ){
         $self->_error(
-            $ERROR_CANNOT_SEND,
-            format_message( "Kafka::IO(%s)->send: ERROR='%s' (length=%s, sent=%s, timeout=%s, secs=%.6f)",
+            $error_code // $ERROR_CANNOT_SEND,
+            format_message( "Kafka::IO(%s)->send: ERRNO=%s ERROR='%s' (length=%s, sent=%s, timeout=%s, retries=%s, interrupts=%s, secs=%.6f)",
                 $self->{host},
+                ( $errno // 0 ) + 0,
                 ( $errno // '<none>' ) . '',
                 $length,
                 $sent,
                 $timeout,
+                $retries,
+                $interrupts,
                 Time::HiRes::time() - $started,
             )
         );
@@ -339,36 +370,94 @@ sub receive {
     $self->_error( $ERROR_MISMATCH_ARGUMENT, '->receive' )
         unless $timeout > 0
     ;
+
     my $socket = $self->{socket};
-    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) if !$socket;
+    my $select = $self->{_io_select};
+    $self->_error( $ERROR_NO_CONNECTION, 'Attempt to work with a closed socket' ) unless $select;
 
     my $started = Time::HiRes::time();
     my $until = $started + $timeout;
 
-    my $error;
+    my $error_code;
+    my $errno;
     my $message = '';
     my $len_to_read = $length;
     my $buf = '';
     my $retries = 0;
-    while ( $len_to_read > 0 && $retries++ < $MAX_RETRIES ) {
+    my $interrupts = 0; 
+    ATTEMPT: while ( $len_to_read > 0 && $retries++ < $MAX_RETRIES ) {
         my $remaining_time = $until - Time::HiRes::time();
         last if $remaining_time <= 0; # timeout expired
 
-        my $from_recv = $socket->read($buf, $length);
-        
-        if ( defined( $from_recv ) && length( $buf ) ) {
-            $message .= $buf;
-            $len_to_read = $length - length( $message );
-            --$retries; # this attempt was successful, don't count as a retry
+        undef $!;
+        my $can_read = $select->can_read( $remaining_time );
+        $errno = $!;
+        if ( $errno ) {
+            if ( $errno == EINTR ) {
+                undef $errno;
+                --$retries; # this attempt does not count
+                ++$interrupts;
+                next ATTEMPT;
+            }
+
+            $self->close;
+
+            last ATTEMPT;
         }
-        if ( my $remaining_attempts = $MAX_RETRIES - $retries ) {
-            $remaining_time = $until - Time::HiRes::time();
-            my $micro_seconds = int( $remaining_time * 1e6 / $remaining_attempts );
-            if ( $micro_seconds > 0 ) {
-                $micro_seconds = 250_000 if $micro_seconds > 250_000; # prevent long sleeps if total remaining time is big
-                $self->_debug_msg( format_message( 'sleeping (remaining attempts %d, time %.6f): %d microseconds', $remaining_attempts, $remaining_time, $micro_seconds ) )
-                    if $self->debug_level;
-                Time::HiRes::usleep( $micro_seconds );
+
+        if ( $can_read ) {
+            my $buf = '';
+            undef $!;
+
+            my $from_recv = $socket->read($buf, $length);
+            
+            if ( defined( $from_recv ) && length( $buf ) ) {
+                $message .= $buf;
+                $len_to_read = $length - length( $message );
+                --$retries; # this attempt was successful, don't count as a retry
+            }
+            if ( $errno ) {
+                if ( $errno == EINTR ) {
+                    undef $errno;
+                    --$retries; # this attempt does not count
+                    ++$interrupts;
+                    next ATTEMPT;
+                } elsif (
+                           $errno != EAGAIN
+                        && $errno != EWOULDBLOCK
+                        ## on freebsd, if we got ECONNRESET, it's a timeout from the other side
+                        && !( $errno == ECONNRESET && $^O eq 'freebsd' )
+                    ) {
+                    $self->close;
+                    last ATTEMPT;
+                }
+            }
+
+            if ( length( $buf ) == 0 ) {
+                if( defined( $from_recv ) && ! $errno ) {
+                    # no error and nothing received with select returning "can read" means EOF: other side closed socket
+                    $self->_debug_msg( 'EOF on receive attempt, closing socket' )
+                        if $self->debug_level;
+                    $self->close;
+
+                    if( length( $message ) == 0 ) {
+                        # we did not receive anything yet, so we may (in some cases) reconnect and try again
+                        $error_code = $ERROR_NO_CONNECTION;
+                    }
+
+                    last ATTEMPT;
+                }
+
+                if ( my $remaining_attempts = $MAX_RETRIES - $retries ) {
+                    $remaining_time = $until - Time::HiRes::time();
+                    my $micro_seconds = int( $remaining_time * 1e6 / $remaining_attempts );
+                    if ( $micro_seconds > 0 ) {
+                        $micro_seconds = 250_000 if $micro_seconds > 250_000; # prevent long sleeps if total remaining time is big
+                        $self->_debug_msg( format_message( 'sleeping (remaining attempts %d, time %.6f): %d microseconds', $remaining_attempts, $remaining_time, $micro_seconds ) )
+                            if $self->debug_level;
+                        Time::HiRes::usleep( $micro_seconds );
+                    }
+                }
             }
         }
     }
@@ -376,12 +465,16 @@ sub receive {
     unless( length( $message ) >= $length )
     {
         $self->_error(
-            $ERROR_CANNOT_RECV,
-            format_message( "Kafka::IO(%s)->receive: ERROR='Failed to receive data' (length=%s, received=%s, timeout=%s, secs=%.6f)",
+            $error_code // $ERROR_CANNOT_RECV,
+            format_message( "Kafka::IO(%s)->receive: ERRNO=%s ERROR='%s' (length=%s, received=%s, timeout=%s, retries=%s, interrupts=%s, secs=%.6f)",
                 $self->{host},
+                ( $errno // 0 ) + 0,
+                ( $errno // '<none>' ) . '',
                 $length,
                 length( $message ),
                 $timeout,
+                $retries,
+                $interrupts,
                 Time::HiRes::time() - $started,
             ),
         );
@@ -407,6 +500,21 @@ Returns a reference to the received message.
 *try_receive = \&receive;
 
 
+sub _is_close_wait {
+    my ( $self ) = @_;
+    return 1 unless $self->{socket} && $self->{_io_select}; # closed already
+    # http://stefan.buettcher.org/cs/conn_closed.html
+    # socket is open; check if we can read, and if we can but recv() cannot peek, it means we got EOF
+    return unless $self->{_io_select}->can_read( 0 ); # we cannot read, but may be able to write
+    my $buf = '';
+    undef $!;
+    my $status = $self->{socket}->peek($buf, 1); # peek, do not remove data from queue
+    # EOF when there is no error, status is defined, but result is empty
+    return ! $! && defined $status && length( $buf ) == 0;
+}
+
+
+
 =head3 C<close>
 
 Closes connection to Kafka server.
@@ -420,6 +528,7 @@ sub close {
     if ( $self->{socket} ) {
         $self->{socket}->shutdown(SHUT_RDWR);
         $self->{socket} = undef;
+        $self->{_io_select} = undef;
     }
 
     return $ret;
@@ -464,6 +573,8 @@ sub _connect {
     $sock->autoflush(1);
 
     $self->{socket} = $sock;
+    my $s = $self->{_io_select} = IO::Select->new;
+    $s->add( $self->{socket} );
 
     return $sock;
 }
@@ -520,7 +631,7 @@ sub _debug_msg {
 sub _error {
     my $self = shift;
     my %args = throw_args( @_ );
-    $self->_debug_msg( format_message( 'throwing SSL IO error %s: %s', $args{code}, $args{message} ) );
+    $self->_debug_msg( format_message( 'throwing SSL IO error %s: %s', $args{code}, $args{message} ) ) if $self->debug_level;
     Kafka::Exception::IO->throw( %args );
 }
 
